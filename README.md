@@ -74,7 +74,7 @@ default-subnet-us-central1                 gcp-types/compute-v1:compute.subnetwo
 ### Acquire LB IP
 
 Now acquire the LB IP address.  You can get this from the DM's ```output``` variable or via the LB configuration on
-the cloud console as shown below.
+the Cloud Console as shown below.
 
 ![ILB](/images/lb_ip.png)
 
@@ -116,7 +116,7 @@ $ for i in {1..100}; do curl -s  http://192.168.0.8; done | sort| uniq -c |sort 
 
 You are free to addin 
 - Stackdriver Logging
-- Stackdriver Monitoirng
+- Stackdriver Monitoring
 
 to the VM's start script
 
@@ -131,13 +131,13 @@ The following screenshots describe monitoring and logging on the cluster for the
 
 ## Conclusion
 
-You can use this template to create any number of high-availablity systems within GCP using GCE instaces, COS instances and so on.
-This setup works best with stateless systems as the default template and LB strategy doest specifically call out affinity.
+You can use this template to create any number of high-availability systems within GCP using GCE instances, COS instances and so on.
+This setup works best with stateless systems as the default template and LB strategy doesn't specifically call out affinity.
 
 ---
 
 ### CleanUP
-You can simply delate the deployment to clean up almost all artifacts.  At the moment of writing (2/19/18), the DM
+You can simply delete the deployment to clean up almost all artifacts.  At the moment of writing (19/Feb/18), the DM
 template cannot concurrently delete VPC peering setup so one of them is omitted.  TO clean the VPC peering setup, goto
 [VPC Peering](https://console.cloud.google.com/networking/peering/list) and delete the residual one after deleting the deployment
 
