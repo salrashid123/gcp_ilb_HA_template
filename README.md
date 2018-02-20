@@ -29,6 +29,19 @@ as a DM Template similar to the published sample [here](https://github.com/salra
 
 The default in this repo creates an apache2 server on port :80 on each VM.
 
+### Prerequsites
+
+Enable APIs on project
+
+```
+gcloud services enable compute.googleapis.com
+gcloud services enable logging.googleapis.com
+gcloud services enable monitoring.googleapis.com
+gcloud services enable deploymentmanager.googleapis.com
+gcloud services enable runtimeconfig.googleapis.com
+```
+
+
 ### Install ILB+Instance Group
 
 Run:
