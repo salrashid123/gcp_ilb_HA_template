@@ -99,6 +99,23 @@ $ for i in {1..100}; do curl -s  http://192.168.0.8; done | sort| uniq -c |sort 
 
 ```
 
+## Logging and Monitoring
+
+You are free to addin 
+- Stackdriver Logging
+- Stackdriver Monitoirng
+
+to the VM's start script
+
+The following screenshots describe monitoring and logging on the cluster for the specific service (in this case apache)
+
+* Logging
+![ILB](/images/logging.png)
+
+* Monitoring 
+![ILB](/images/monitoring.png)
+
+
 ## Conclusion
 
 You can use this template to create any number of high-availablity systems within GCP using GCE instaces, COS instances and so on.

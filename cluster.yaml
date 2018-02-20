@@ -12,13 +12,20 @@ resources:
     region: us-central1
     subnet: "192.168.0.0/16"
     instance_tag: apache
-    targetSize: 6
+
+    enableCloudLogging: true
+    enableCloudMonitoring: true
+    
+    targetSize: 4
     maxNumReplicas: 6
     minNumReplicas: 4
     service_account: default
     scopes:
+    scopes:
     - https://www.googleapis.com/auth/cloudruntimeconfig
     - https://www.googleapis.com/auth/compute
+    - https://www.googleapis.com/auth/monitoring.write
+    - https://www.googleapis.com/auth/logging.write
     port: 80
     external_network_name: default
     delete_external_ip: true

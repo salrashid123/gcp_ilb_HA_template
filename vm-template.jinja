@@ -131,8 +131,22 @@ resources:
             a2enmod ssl
 
             export HOME=/root
-            gcloud components update -q
-            gcloud components install beta -q
+            {% if  properties['enableCloudMonitoring'] %}
+              curl -O "https://repo.stackdriver.com/stack-install.sh"
+              bash stack-install.sh --write-gcm
+              cd /etc/httpd/conf.d/ && curl -O https://raw.githubusercontent.com/Stackdriver/stackdriver-agent-service-configs/master/etc/httpd/conf.d/status.conf
+              cd /opt/stackdriver/collectd/etc/collectd.d/ && curl -O https://raw.githubusercontent.com/Stackdriver/stackdriver-agent-service-configs/master/etc/collectd.d/apache.conf
+
+              service stackdriver-agent restart
+            {% endif %}
+
+            {% if  properties['enableCloudLogging'] %}
+              curl -sSO https://dl.google.com/cloudagents/install-logging-agent.sh
+              bash install-logging-agent.sh
+
+              sed -i 's/format none/format apache/' /etc/google-fluentd/config.d/apache.conf
+              service google-fluentd restart
+            {% endif %}
 
             echo '
             [supervisord]
