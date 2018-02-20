@@ -1,0 +1,249 @@
+{% set PREFIX_NAME = env['deployment'] %}
+
+resources:
+- name: {{ properties["external_network_name"] }}
+  action: gcp-types/compute-v1:compute.networks.get
+  metadata:
+    runtimePolicy:
+    - CREATE
+  properties:
+    network: {{ properties["external_network_name"] }}
+
+- name: {{ properties["external_network_name"] }}-subnet-{{ properties["region"] }}
+  action: gcp-types/compute-v1:compute.subnetworks.get
+  metadata:
+    runtimePolicy:
+    - CREATE
+  properties:
+    subnetwork: {{ properties["external_network_name"] }}
+    region: {{ properties["region"] }}
+
+- name: {{ PREFIX_NAME }}-custom-network
+  type: compute.v1.network
+  properties:
+    autoCreateSubnetworks: false
+
+- name: {{ PREFIX_NAME }}-custom-subnet
+  type: compute.v1.subnetwork
+  properties:
+    network: $(ref.{{ PREFIX_NAME }}-custom-network.selfLink)
+    region: {{ properties["region"] }}
+    privateIpGoogleAccess: {{ properties["privateIpGoogleAccess"] }}
+    ipCidrRange: "{{ properties["subnet"] }}"
+
+- name: {{ PREFIX_NAME }}-addPeering-from-custom-subnet
+  action: gcp-types/compute-v1:compute.networks.addPeering
+  metadata:
+    runtimePolicy:
+    - CREATE
+  properties:
+    network: $(ref.{{ PREFIX_NAME }}-custom-network.name)
+    name: {{ PREFIX_NAME }}-vpc-from-custom-network
+    autoCreateRoutes: true
+    peerNetwork: $(ref.{{ properties["external_network_name"] }}.selfLink)
+
+- name: {{ PREFIX_NAME }}-addPeering-to-custom-subnet
+  action: gcp-types/compute-v1:compute.networks.addPeering
+  metadata:
+    runtimePolicy:
+    - CREATE
+  properties:
+    network: $(ref.{{ properties["external_network_name"] }}.name)
+    name: {{ PREFIX_NAME }}-vpc-to-custom-network
+    autoCreateRoutes: true
+    peerNetwork: $(ref.{{ PREFIX_NAME }}-custom-network.selfLink)
+
+- name: {{ PREFIX_NAME }}-removePeering-from-custom-subnet
+  action: gcp-types/compute-v1:compute.networks.removePeering
+  metadata:
+    runtimePolicy:
+    - DELETE
+  properties:
+    name: {{ PREFIX_NAME }}-vpc-from-custom-network
+    network: $(ref.{{ PREFIX_NAME }}-custom-network.name)
+
+{#
+- name: {{ PREFIX_NAME }}-removePeering-to-custom-subnet
+  action: gcp-types/compute-v1:compute.networks.removePeering
+  metadata:
+    runtimePolicy:
+    - DELETE
+  properties:
+    name: {{ PREFIX_NAME }}-vpc-to-custom-network
+    network: $(ref.{{ properties["external_network_name"] }}.name)
+#}
+
+- name: {{ PREFIX_NAME }}-firewall-allow-{{ properties["external_network_name"] }}-{{ properties["region"] }}
+  type: compute.v1.firewall
+  properties:
+    network: $(ref.{{ PREFIX_NAME }}-custom-network.selfLink)
+    allowed:
+      - IPProtocol: TCP
+        ports: [ {{ properties["port"] }} ]
+    targetTags: [ {{ properties["instance_tag"] }} ]
+    sourceRanges: [ "$(ref.{{ properties["external_network_name"] }}-subnet-{{ properties["region"] }}.ipCidrRange)" ]
+
+- name: {{ PREFIX_NAME }}-firewall-allow-tcp22-icmp
+  type: compute.v1.firewall
+  properties:
+    network: $(ref.{{ PREFIX_NAME }}-custom-network.selfLink)
+    allowed:
+      - IPProtocol: TCP
+        ports: [ 22 ]
+      - IPProtocol: ICMP
+    targetTags: [ {{ properties["instance_tag"] }} ]
+
+- name: {{ PREFIX_NAME }}-it
+  type: compute.v1.instanceTemplate
+  properties:
+    properties:
+      machineType: {{ properties["instance_type"] }}
+      serviceAccounts:
+        - email: {{ properties["service_account"] }}
+          scopes:
+          {% for scope in properties['scopes'] %}
+          - {{ scope }}
+          {% endfor %}
+      tags:
+        items:
+        -  {{ properties["instance_tag"] }}
+      networkInterfaces:
+      - network: $(ref.{{ PREFIX_NAME }}-custom-network.selfLink)
+        accessConfigs:
+        - name: External-IP
+          type: ONE_TO_ONE_NAT
+        subnetwork: $(ref.{{ PREFIX_NAME }}-custom-subnet.selfLink)
+      disks:
+      - deviceName: boot
+        type: PERSISTENT
+        boot: true
+        autoDelete: true
+        initializeParams:
+          sourceImage: {{ properties["sourceImage"] }}
+      metadata:
+        items:
+        - key: startup-script
+          value: |
+            #!/bin/bash
+            apt-get update
+            apt-get install apache2 curl supervisor -y
+            a2ensite default-ssl
+            a2enmod ssl
+
+            export HOME=/root
+            gcloud components update -q
+            gcloud components install beta -q
+
+            echo '
+            [supervisord]
+            nodaemon=false
+
+            [program:apache2]
+            command=/usr/sbin/apache2ctl -DFOREGROUND
+            stdout_events_enabled=true
+            stderr_events_enabled=true             
+            ' >  /etc/supervisor/conf.d/supervisord.conf
+
+            service supervisord restart
+
+            export INSTANCE=$(curl http://metadata.google.internal/computeMetadata/v1/instance/hostname -H "Metadata-Flavor: Google")
+            export ZONE=$(curl http://metadata.google.internal/computeMetadata/v1/instance/zone -H "Metadata-Flavor: Google")
+
+            echo "$INSTANCE  $ZONE" > /var/www/html/index.html
+            {% if properties["delete_external_ip"] %}
+            gcloud compute instances delete-access-config `hostname` --access-config-name "External-IP" --zone `echo $ZONE| awk '{split($0,a,"/"); print a[4]}'`
+            {% endif %}
+
+            gcloud beta runtime-config configs variables set success/{{ PREFIX_NAME }}-waiter/$INSTANCE success --config-name $(ref.{{ PREFIX_NAME }}-config.name)
+
+- name: {{ PREFIX_NAME }}-igm
+  type: compute.v1.regionInstanceGroupManager
+  properties:
+    baseInstanceName: {{ PREFIX_NAME }}-instance
+    instanceTemplate: $(ref.{{ PREFIX_NAME }}-it.selfLink)
+    targetSize: {{ properties["targetSize"] }}
+    region: {{ properties["region"] }}
+
+- name: {{ PREFIX_NAME }}-as
+  type: compute.v1.regionAutoscaler
+  properties:
+    region: {{ properties["region"] }}
+    target: $(ref.{{ PREFIX_NAME }}-igm.selfLink)
+    autoscalingPolicy:
+      maxNumReplicas: {{ properties["maxNumReplicas"] }}
+      minNumReplicas: {{ properties["minNumReplicas"] }}
+
+- name: {{ PREFIX_NAME }}-hc-tcp
+  type: compute.v1.healthCheck
+  properties:
+    type: TCP
+    tcpHealthCheck:
+      port: {{ properties["port"] }}
+
+- name: {{ PREFIX_NAME }}-bes
+  type: compute.v1.regionBackendService
+  properties:
+    protocol: TCP
+    loadBalancingScheme: "INTERNAL"
+    region: {{ properties["region"] }}
+    backends:
+      - name: {{ PREFIX_NAME }}-primary
+        group: $(ref.{{ PREFIX_NAME }}-igm.instanceGroup)
+    healthChecks: [ $(ref.{{ PREFIX_NAME }}-hc-tcp.selfLink) ]
+
+- name: {{ PREFIX_NAME }}-fwdrule
+  type: compute.v1.forwardingRule
+  properties:
+    loadBalancingScheme: "INTERNAL"
+    ports: [{{ properties["port"] }}]
+    region: {{ properties["region"] }}
+    subnetwork: $(ref.{{ PREFIX_NAME }}-custom-subnet.selfLink)
+    network: $(ref.{{ PREFIX_NAME }}-custom-network.selfLink)
+    backendService: $(ref.{{ PREFIX_NAME }}-bes.selfLink)
+
+- name: {{ PREFIX_NAME }}-firewall-allow-internal-lb
+  type: compute.v1.firewall
+  properties:
+    network: $(ref.{{ PREFIX_NAME }}-custom-network.selfLink)
+    allowed:
+      - IPProtocol: TCP
+        ports: [ {{ properties["port"] }} ]
+    sourceRanges: [ {{ properties["subnet"] }} ]
+    targetTags: [ {{ properties["instance_tag"] }} ]
+
+- name: {{ PREFIX_NAME }}-firewall-allow-health-check
+  type: compute.v1.firewall
+  properties:
+    network: $(ref.{{ PREFIX_NAME }}-custom-network.selfLink)
+    allowed:
+      - IPProtocol: TCP
+        ports: [ {{ properties["port"] }} ]
+    targetTags: [ {{ properties["instance_tag"] }} ]
+    sourceRanges: [ "130.211.0.0/22", "35.191.0.0/16" ]
+
+- type: runtimeconfig.v1beta1.config
+  name: {{ PREFIX_NAME }}-config
+  properties:
+    config: {{ PREFIX_NAME }}-config
+
+- type: runtimeconfig.v1beta1.waiter
+  name: {{ PREFIX_NAME }}-waiter
+  metadata:
+    dependsOn:
+    - {{ PREFIX_NAME }}-config
+  properties:
+    parent: $(ref.{{ PREFIX_NAME }}-config.name)
+    waiter: {{ PREFIX_NAME }}-waiter
+    timeout: 600s
+    success:
+      cardinality:
+        path: /success
+        number: {{ properties["targetSize"] }}
+    failure:
+      cardinality:
+        path: /failure
+        number: {{ properties["targetSize"] }}
+
+outputs:
+- name: ip
+  value: $(ref.{{ PREFIX_NAME }}-fwdrule.IPAddress)

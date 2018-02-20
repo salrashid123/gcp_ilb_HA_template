@@ -1,0 +1,25 @@
+
+imports:
+- path: vm-template.jinja
+
+resources:
+- name: cluster
+  type: vm-template.jinja
+  properties:
+    instance_type:  n1-standard-1
+    sourceImage: https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/family/debian-9
+    zone: us-central1-a
+    region: us-central1
+    subnet: "192.168.0.0/16"
+    instance_tag: apache
+    targetSize: 6
+    maxNumReplicas: 6
+    minNumReplicas: 4
+    service_account: default
+    scopes:
+    - https://www.googleapis.com/auth/cloudruntimeconfig
+    - https://www.googleapis.com/auth/compute
+    port: 80
+    external_network_name: default
+    delete_external_ip: true
+    privateIpGoogleAccess: true
